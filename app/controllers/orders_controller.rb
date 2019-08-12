@@ -8,13 +8,26 @@ class OrdersController < ApplicationController
   def index
     #data = HTTParty.get("http://localhost:3000/customers.json")
     #p data.parsed_response[0]['email']
+    if params[:customerId].present?
+      @orders = Order.where("customerId": params[:customerId].to_i)
+        render json: @orders, status: 200
+    elsif params[:id].present?
+      @orders = Order.find_by id: params[:id]
+      render json: @orders, status:200
+    elsif params[:email].present?
+      res = HTTParty.get("http://localhost:8081/customers/?email=#{params['email']}")
+      res = res.parsed_response
+      @orders = Order.where("customerId": res['id'])
+      render json: @orders, status:200
+    else
     @orders = Order.all
+    end
   end
 
   # GET /orders/1
   # GET /orders/1.json
   def show
-    order = Order.find_by(id: params[:id])
+    order = Order.find_by id: params[:id]
        if order.nil?
            render json: { error: "Order not found. #{ params[:id]}"}, status: 404
        else
@@ -34,12 +47,23 @@ class OrdersController < ApplicationController
   # POST /orders
   # POST /orders.json
   def create
-    res = HTTParty.get("http://localhost:8081/customers/#{order_params['customerId']}.json")
+    res = HTTParty.get("http://localhost:8081/customers/?id=#{order_params['customerId']}")
     codeCustomer = res.code
     dataCustomer = res.parsed_response
     res = HTTParty.get("http://localhost:8082/items/#{order_params['itemId']}.json")
     codeItem = res.code
     dataItem = res.parsed_response
+    if dataCustomer["award"] > 0
+      newParams = order_params
+      newParams["award"] = dataCustomer["award"] 
+      newParams["price"] = newParams["price"] - dataCustomer["award"]
+      if(newParams["price"] < 0)
+        newParams["price"] = 0
+        p newParams
+        HTTParty.put("http://localhost:8081/customers/order?award=#{newParams['award']}&total=0&customerId=#{newParams['customerId']}")
+      end
+    end
+
     if codeCustomer == 404 || codeItem == 404
       if codeCustomer == 404 and codeItem == 404
         render json: {error: "Customer and Item do not exist"}, status: 400
@@ -54,7 +78,7 @@ class OrdersController < ApplicationController
         return
       end
     else
-      @order = Order.new(order_params)
+      @order = Order.new(newParams)
 
     respond_to do |format|
       if @order.save
